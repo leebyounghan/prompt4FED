@@ -13,3 +13,15 @@ pip install -e .
 
 - transformers              4.31.0
 - 등등
+- *PEFT test.ipynb로 확인
+
+
+# 데이터분할
+```
+bash movie_load.sh
+```
+
+#FL 코드 실행
+```
+bash run.sh
+```
