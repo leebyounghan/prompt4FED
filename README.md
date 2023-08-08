@@ -2,8 +2,11 @@
 
 # flower lib 설치
 
-```python
-print('hello')
+```
+git clone https://github.com/adap/flower.git
+git checkout VCE_with_actorpool
+git pull
+pip install -e .
 ```
 
 # 이외 해당 lib 설치
