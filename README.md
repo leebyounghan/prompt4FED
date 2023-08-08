@@ -4,10 +4,10 @@
 
 '''
 {
-git clone https://github.com/adap/flower.git
-git checkout VCE_with_actorpool
-git pull
-pip install -e .
+  git clone https://github.com/adap/flower.git
+  git checkout VCE_with_actorpool
+  git pull
+  pip install -e .
 }
 '''
 
