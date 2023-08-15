@@ -18,7 +18,7 @@ pip install -e .
 
 # 데이터분할
 ```
-bash movie_load.sh
+test.ipynb로 확인
 ```
 
 #FL 코드 실행
