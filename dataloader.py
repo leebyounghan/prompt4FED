@@ -4,13 +4,11 @@ import pickle
 import json
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+import argparse
 
 from sentence_transformers import SentenceTransformer
 from sklearn.cluster import KMeans
-from sklearn.model_selection import train_test_split
-from common import create_lda_partitions
-from collections import Counter
+
 class CustomDataset:
     def __init__(self, args):
         self.args = args
@@ -18,21 +16,19 @@ class CustomDataset:
     def bert_clustering(self, corpus):
         embedding_data = {}
         corpus_embeddings = []
-        if not self.args.embedding_exist:
-            embedder = SentenceTransformer(
+        embedder = SentenceTransformer(
                 "distilbert-base-nli-stsb-mean-tokens", device="cuda:0"
-            )  # server only
-            corpus_embeddings = embedder.encode(
-                corpus, show_progress_bar=True, batch_size=self.args.batch
-            )  # smaller batch size for GPU
+        )  # server only
+        corpus_embeddings = embedder.encode(
+            corpus, show_progress_bar=True, batch_size=self.args.batch
+        )  # smaller batch size for GPU
 
-            embedding_data["data"] = corpus_embeddings
-        else:
-            corpus_embeddings = corpus
+        embedding_data["data"] = corpus_embeddings
+            
 
         ### KMEANS clustering
         print("start Kmeans")
-        num_clusters = self.args.client_num
+        num_clusters = self.args.cluster_number
         clustering_model = KMeans(n_clusters=num_clusters)
         clustering_model.fit(corpus_embeddings)
         cluster_assignment = clustering_model.labels_
@@ -110,120 +106,76 @@ class CustomDataset:
         df['assigned'] = cluster_assignment
 
         return df
+            
+    
+def data_load():
+    # load dataset
+    parser = arguments()
+    args = parser.parse_args()
+    
+    # Create CustomDataset instance
+    custom_dataset = CustomDataset(args)
+    # Load datasets
+    dataframe = custom_dataset.load_datasets()
+    
+    folder = 'dataset'
+    os.makedirs(folder, exist_ok=True)  
+    
+    filename = os.path.join(folder, "dataset.csv")
+        
+    dataframe.to_csv(filename, index=False)
+    
+def arguments():
+    
+    parser = argparse.ArgumentParser()
 
+    parser.add_argument(
+        "--cluster_number",
+        type=int,
+        default="5",
+        metavar="CN",
+        help="client number for lda partition",
+    )
 
+    parser.add_argument(
+        "--batch",
+        type=int,
+        default="4",
+        metavar="CN",
+        help="batch size for sentenceBERT",
+    )
 
+    parser.add_argument(
+        "--data_file",
+        type=str,
+        default="/data_files/data.h5",
+        metavar="DF",
+        help="data pickle file path",
+    )
 
-class CustomPartition:
-    def __init__(self, args):
-        self.num_clients = args.num_clients
-        self.dataframe = args.dataframe
-        self.alpha = args.alpha
-        self.val_ratio = args.val_ratio
-        self.imbalance = args.imbalance
-        self.random_state = args.random_state
+    parser.add_argument(
+        "--embedding_file",
+        type=str,
+        default="/data_files/data_embedding.h5",
+        metavar="EF",
+        help="embedding pickle file path",
+    )
 
-    def data_partition(self):
-        idx = np.array(range(len(self.dataframe)))
-        labels = self.dataframe.assigned.to_numpy()
-        dataset = [idx, labels]
-        unique_labels = np.unique(labels)
+    parser.add_argument(
+        "--task_type",
+        type=str,
+        metavar="TT",
+        default="seq2seq",
+        help="task type",
+    )
 
-        partition = [[[], []] for _ in range(self.num_clients)]
+    parser.add_argument(
+        "--overwrite",
+        action="store_false",
+        default=True,
+        help="True if embedding data file does not exist False if it does exist",
+    )
+    
+    return parser
 
-        if not self.imbalance:  # IID, Uniformly distributed
-            for label in unique_labels:
-                label_indices = np.where(labels == label)[0]
-                np.random.shuffle(label_indices)
-
-                split_size = len(label_indices) // self.num_clients
-
-                for i in range(self.num_clients):
-                    start_idx = i * split_size
-                    end_idx = (i + 1) * split_size if i < self.num_clients - 1 else len(label_indices)
-                    client_indices = label_indices[start_idx:end_idx]
-                    partition[i][0].extend(idx[client_indices])
-                    partition[i][1].extend(labels[client_indices])
-        else:
-            # Non-iid partition
-            partition, _ = create_lda_partitions(
-                dataset, num_partitions=self.num_clients, concentration=self.alpha, accept_imbalanced=True
-            )
-
-        return partition
-
-    def data_distribution(self, partitions):
-        client_dataframes = []
-
-        for partition in partitions:
-            idx_list = partition[0]
-            label_list = partition[1]
-
-            client_df = self.dataframe.iloc[idx_list].copy()
-            client_df['assigned'] = label_list
-
-            train_df, test_df = train_test_split(client_df, test_size=self.val_ratio, random_state=self.random_state)
-
-            client_dataframes.append((train_df, test_df))
-
-        return client_dataframes
-
-    def data_visualization(self, partitions):
-        plt.figure(figsize=(12, 6))
-
-        for i, client_partition in enumerate(partitions):
-            plt.subplot(1, len(partitions), i + 1)
-            labels = client_partition[1]
-            label_counts = Counter(labels)
-            assigned_values = sorted(label_counts.keys())
-            counts = [label_counts[value] for value in assigned_values]
-
-            plt.bar(assigned_values, counts, alpha=0.5, label='Data')
-            plt.title(f"Client {i + 1} Assigned")
-            plt.xlabel("Assigned Value")
-            plt.ylabel("Count")
-            plt.xticks(rotation=0)
-            plt.legend()
-
-        plt.tight_layout()
-        plt.show()
-
-    def split_visualization(self, client_dataframes):
-        plt.figure(figsize=(12, 6))
-
-        for i, (train_df, test_df) in enumerate(client_dataframes):
-            plt.subplot(1, len(client_dataframes), i + 1)
-
-            train_labels = train_df['assigned']
-            train_label_counts = Counter(train_labels)
-            train_assigned_values = sorted(train_label_counts.keys())
-            train_counts = [train_label_counts[value] for value in train_assigned_values]
-
-            test_labels = test_df['assigned']
-            test_label_counts = Counter(test_labels)
-            test_assigned_values = sorted(test_label_counts.keys())
-            test_counts = [test_label_counts[value] for value in test_assigned_values]
-
-            plt.bar(train_assigned_values, train_counts, alpha=0.5, label='Train')
-            plt.bar(test_assigned_values, test_counts, alpha=0.5, label='Test')
-
-            plt.title(f"Client {i + 1} Assigned")
-            plt.xlabel("Assigned Value")
-            plt.ylabel("Count")
-            plt.xticks(rotation=0)
-            plt.legend()
-
-        plt.tight_layout()
-        plt.show()
-
-    def count_labels(self, partitions):
-        # 클라이언트 별 레이블 수 세기
-        client_label_counts = []
-
-        for client_partition in partitions:
-            labels = client_partition[1]
-            label_counts = Counter(labels)
-            client_label_counts.append(label_counts)
-
-        for label_count in client_label_counts:
-            print(label_count)
+data_load()
